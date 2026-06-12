@@ -1,0 +1,30 @@
+{
+  "name": "interaction-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/interaction-service/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/apps/interaction-service",
+        "main": "apps/interaction-service/src/main.ts",
+        "tsConfig": "apps/interaction-service/tsconfig.app.json",
+        "assets": []
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node -r tsconfig-paths/register ./node_modules/tsx/dist/cli.mjs watch --tsconfig apps/interaction-service/tsconfig.app.json apps/interaction-service/src/main.ts",
+        "cwd": "{workspaceRoot}",
+        "env": {
+          "TS_NODE_PROJECT": "tsconfig.json"
+        }
+      }
+    }
+  },
+  "tags": []
+}
+

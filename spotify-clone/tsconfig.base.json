@@ -1,0 +1,25 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "target": "ES2021",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2021"],
+    "sourceMap": true,
+    "declaration": false,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@spotify/common": ["libs/common/src/index.ts"],
+      "@spotify/prisma": ["libs/prisma/src/index.ts"],
+      "@spotify/bull-config": ["libs/bull-config/src/index.ts"]
+    }
+  },
+  "exclude": ["node_modules", "tmp"]
+}

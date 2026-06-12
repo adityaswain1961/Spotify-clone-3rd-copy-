@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+option java_package = "com.spotify.android";
+option java_multiple_files = true;
+
+message TokenPreferences {
+  string access_token = 1;
+  string refresh_token = 2;
+  string user_id = 3;
+  string user_role = 4;
+}
+

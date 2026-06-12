@@ -1,0 +1,29 @@
+{
+  "name": "media-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/media-service/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/apps/media-service",
+        "main": "apps/media-service/src/main.ts",
+        "tsConfig": "apps/media-service/tsconfig.app.json",
+        "assets": []
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node -r tsconfig-paths/register ./node_modules/tsx/dist/cli.mjs watch --tsconfig apps/media-service/tsconfig.app.json apps/media-service/src/main.ts",
+        "cwd": "{workspaceRoot}",
+        "env": {
+          "TS_NODE_PROJECT": "tsconfig.json"
+        }
+      }
+    }
+  },
+  "tags": []
+}

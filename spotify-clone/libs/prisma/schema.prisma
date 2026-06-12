@@ -1,0 +1,184 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  LISTENER
+  ARTIST
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  fcmToken     String?   @map("fcm_token")
+  role         UserRole  @default(LISTENER)
+  isVerified   Boolean   @default(false) @map("is_verified")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  profile       UserProfile?
+  artist        Artist?
+  playlists     Playlist[]
+  likes         Like[]
+  follows       ArtistFollow[]
+  listenHistory ListenHistory[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique @map("user_id")
+  displayName String   @map("display_name")
+  avatarKey   String?  @map("avatar_key")
+  bio         String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_profiles")
+}
+
+model Artist {
+  id        String   @id @default(uuid())
+  userId    String   @unique @map("user_id")
+  stageName String   @map("stage_name")
+  bio       String?
+  avatarKey String?  @map("avatar_key")
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
+  user    User           @relation(fields: [userId], references: [id])
+  songs   Song[]
+  albums  Album[]
+  follows ArtistFollow[]
+
+  @@index([searchVector], type: Gin)
+  @@map("artists")
+}
+
+model Song {
+  id             String   @id @default(uuid())
+  title          String
+  duration       Int
+  hlsManifestKey String   @map("hls_manifest_key")
+  coverImageKey  String?  @map("cover_image_key")
+  genres         String[] @default([])
+  tags           String[] @default([])
+  artistId       String   @map("artist_id")
+  albumId        String?  @map("album_id")
+  isPublished    Boolean  @default(false) @map("is_published")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  playCount      Int      @default(0) @map("play_count")
+
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
+  artist        Artist         @relation(fields: [artistId], references: [id])
+  album         Album?         @relation(fields: [albumId], references: [id])
+  playlistSongs PlaylistSong[]
+  likes         Like[]
+  listenHistory ListenHistory[]
+
+  @@index([searchVector], type: Gin)
+  @@map("songs")
+}
+
+model Album {
+  id            String   @id @default(uuid())
+  title         String
+  coverImageKey String?  @map("cover_image_key")
+  artistId      String   @map("artist_id")
+  releaseDate   DateTime @map("release_date")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  artist Artist @relation(fields: [artistId], references: [id])
+  songs  Song[]
+
+  @@map("albums")
+}
+
+model Playlist {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  coverKey    String?  @map("cover_key")
+  isPublic    Boolean  @default(true) @map("is_public")
+  userId      String   @map("user_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
+  user          User           @relation(fields: [userId], references: [id])
+  playlistSongs PlaylistSong[]
+  likes         Like[]
+
+  @@index([searchVector], type: Gin)
+  @@map("playlists")
+}
+
+model PlaylistSong {
+  id         String   @id @default(uuid())
+  playlistId String   @map("playlist_id")
+  songId     String   @map("song_id")
+  position   Int
+  addedAt    DateTime @default(now()) @map("added_at")
+
+  playlist Playlist @relation(fields: [playlistId], references: [id])
+  song     Song     @relation(fields: [songId], references: [id])
+
+  @@unique([playlistId, songId])
+  @@unique([playlistId, position])
+  @@map("playlist_songs")
+}
+
+model Like {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  songId     String?  @map("song_id")
+  playlistId String?  @map("playlist_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user     User      @relation(fields: [userId], references: [id])
+  song     Song?     @relation(fields: [songId], references: [id])
+  playlist Playlist? @relation(fields: [playlistId], references: [id])
+
+  @@unique([userId, songId])
+  @@unique([userId, playlistId])
+  @@map("likes")
+}
+
+model ArtistFollow {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  artistId  String   @map("artist_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id])
+  artist Artist @relation(fields: [artistId], references: [id])
+
+  @@unique([userId, artistId])
+  @@map("artist_follows")
+}
+
+model ListenHistory {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  songId     String   @map("song_id")
+  listenedAt DateTime @default(now()) @map("listened_at")
+
+  user User @relation(fields: [userId], references: [id])
+  song Song @relation(fields: [songId], references: [id])
+
+  @@map("listen_history")
+}

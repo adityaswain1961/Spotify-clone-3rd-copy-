@@ -1,0 +1,29 @@
+{
+  "name": "playlist-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/playlist-service/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/apps/playlist-service",
+        "main": "apps/playlist-service/src/main.ts",
+        "tsConfig": "apps/playlist-service/tsconfig.app.json",
+        "assets": []
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node -r tsconfig-paths/register ./node_modules/tsx/dist/cli.mjs watch --tsconfig apps/playlist-service/tsconfig.app.json apps/playlist-service/src/main.ts",
+        "cwd": "{workspaceRoot}",
+        "env": {
+          "TS_NODE_PROJECT": "tsconfig.json"
+        }
+      }
+    }
+  },
+  "tags": []
+}

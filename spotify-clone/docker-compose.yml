@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: spotify-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: spotify
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: spotify-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: spotify-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEBUG=1
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - localstack_data:/var/lib/localstack
+
+volumes:
+  postgres_data:
+  redis_data:
+  localstack_data:

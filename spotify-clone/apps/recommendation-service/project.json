@@ -1,0 +1,30 @@
+{
+  "name": "recommendation-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/recommendation-service/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/apps/recommendation-service",
+        "main": "apps/recommendation-service/src/main.ts",
+        "tsConfig": "apps/recommendation-service/tsconfig.app.json",
+        "assets": []
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node -r tsconfig-paths/register ./node_modules/tsx/dist/cli.mjs watch --tsconfig apps/recommendation-service/tsconfig.app.json apps/recommendation-service/src/main.ts",
+        "cwd": "{workspaceRoot}",
+        "env": {
+          "TS_NODE_PROJECT": "tsconfig.json"
+        }
+      }
+    }
+  },
+  "tags": []
+}
+
