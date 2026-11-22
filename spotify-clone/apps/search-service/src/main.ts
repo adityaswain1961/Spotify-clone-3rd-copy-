@@ -1,32 +1,6 @@
+import '@spotify/env';
 import 'reflect-metadata';
-import { ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { bootstrapService } from '@spotify/common';
 import { AppModule } from './app.module';
-import {
-  GlobalExceptionFilter,
-  PinoLoggerService,
-  TransformInterceptor,
-  setupOtel,
-} from '@spotify/common';
 
-async function bootstrap(): Promise<void> {
-  await setupOtel();
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
-  const logger = app.get(PinoLoggerService);
-  app.useLogger(logger);
-  app.useGlobalFilters(new GlobalExceptionFilter());
-  app.useGlobalInterceptors(new TransformInterceptor());
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
-
-  await app.listen(3006);
-  logger.log('search-service listening on port 3006');
-}
-
-void bootstrap();
-
+void bootstrapService(AppModule, { name: 'search-service', port: 3006 });

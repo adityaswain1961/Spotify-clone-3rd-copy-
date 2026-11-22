@@ -1,124 +1,149 @@
 import {
+  BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
-import { PrismaService } from '@spotify/prisma';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { NOTIFICATION_QUEUE, TRANSCODING_QUEUE } from '@spotify/bull-config';
+import { randomUUID } from 'crypto';
+import { extname } from 'path';
+import { TRANSCODING_QUEUE } from '@spotify/bull-config';
+import { envInt } from '@spotify/common';
+import { AUDIO_MIME_TYPE, AudioQuality, ObjectStorage } from '@spotify/media';
+import { hydrateSongs, PrismaService, SongDto } from '@spotify/prisma';
 import { SongMetadataDto } from './dto/song-metadata.dto';
 import { UploadUrlDto } from './dto/upload-url.dto';
-import { randomUUID } from 'crypto';
-import { S3Service } from './s3.service';
-import { CloudFrontService } from './cloudfront.service';
+import { STORAGE } from './storage.provider';
+
+export interface MediaUrlDto {
+  songId: string;
+  quality: AudioQuality;
+  url: string;
+  mimeType: string;
+  sizeBytes: number | null;
+  /** ISO time after which the URL stops working. Clients cache the URL until shortly before this. */
+  expiresAt: string;
+}
+
+export interface TranscodeJob {
+  songId: string;
+  uploadKey: string;
+}
+
+const audioSelect = {
+  id: true,
+  isPublished: true,
+  audioLowKey: true,
+  audioHighKey: true,
+  audioLowBytes: true,
+  audioHighBytes: true,
+} as const;
+
+type AudioRow = {
+  id: string;
+  isPublished: boolean;
+  audioLowKey: string | null;
+  audioHighKey: string | null;
+  audioLowBytes: number | null;
+  audioHighBytes: number | null;
+};
 
 @Injectable()
 export class SongsService {
+  private readonly streamTtl = envInt('STREAM_URL_TTL_SECONDS', 6 * 60 * 60);
+  private readonly downloadTtl = envInt('DOWNLOAD_URL_TTL_SECONDS', 30 * 60);
+
   constructor(
     private readonly prisma: PrismaService,
-    private readonly s3Service: S3Service,
-    private readonly cloudfrontService: CloudFrontService,
-    @InjectQueue(TRANSCODING_QUEUE) private readonly transcodingQueue: Queue,
-    @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue,
+    @Inject(STORAGE) private readonly storage: ObjectStorage,
+    @InjectQueue(TRANSCODING_QUEUE) private readonly transcodingQueue: Queue<TranscodeJob>,
   ) {}
 
-  async createUploadUrl(
-    dto: UploadUrlDto,
-    userId?: string,
-    role?: string,
-  ): Promise<{ uploadUrl: string; s3Key: string }> {
-    this.assertArtistRole(userId, role);
-    const s3Key = `raw/${userId}/${Date.now()}-${randomUUID()}-${dto.filename}`;
-    const uploadUrl = await this.s3Service.createUploadUrl(s3Key, dto.contentType);
-    return { uploadUrl, s3Key };
+  async getSong(id: string): Promise<SongDto> {
+    const [song] = await hydrateSongs(this.prisma, [id]);
+    if (!song) throw new NotFoundException('Song not found');
+    return song;
   }
 
-  async createMetadata(
-    dto: SongMetadataDto,
-    userId?: string,
-    role?: string,
-  ): Promise<{ songId: string }> {
-    this.assertArtistRole(userId, role);
-    const artist = await this.prisma.artist.findUnique({ where: { userId: userId! } });
-    if (!artist) {
-      throw new NotFoundException('Artist profile not found');
+  getSongs(ids: string[]): Promise<SongDto[]> {
+    return hydrateSongs(this.prisma, ids);
+  }
+
+  async getMediaUrl(id: string, quality: AudioQuality, purpose: 'stream' | 'download'): Promise<MediaUrlDto> {
+    const song = await this.prisma.song.findUnique({ where: { id }, select: audioSelect });
+    if (!song) throw new NotFoundException('Song not found');
+    const url = await this.signRendition(song, quality, purpose === 'stream' ? this.streamTtl : this.downloadTtl);
+    if (!url) throw new ForbiddenException('Song is still processing');
+    return url;
+  }
+
+  /** Sign URLs for a whole queue in one round-trip. Unplayable ids are skipped. */
+  async getStreamUrls(ids: string[], quality: AudioQuality): Promise<{ items: MediaUrlDto[] }> {
+    const rows = await this.prisma.song.findMany({ where: { id: { in: ids } }, select: audioSelect });
+    const signed = await Promise.all(rows.map((row) => this.signRendition(row, quality, this.streamTtl)));
+    return { items: signed.filter((item): item is MediaUrlDto => item !== null) };
+  }
+
+  async createUploadUrl(dto: UploadUrlDto, userId: string, role?: string) {
+    this.assertArtist(role);
+    const extension = extname(dto.filename).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 6);
+    const uploadKey = `raw/${userId}/${randomUUID()}${extension}`;
+    const uploadUrl = await this.storage.signedPutUrl('uploads', uploadKey, dto.contentType, 15 * 60);
+    return { uploadUrl, uploadKey, method: 'PUT', headers: { 'Content-Type': dto.contentType } };
+  }
+
+  async createMetadata(dto: SongMetadataDto, userId: string, role?: string): Promise<{ songId: string }> {
+    this.assertArtist(role);
+    if (!dto.uploadKey.startsWith(`raw/${userId}/`)) {
+      throw new BadRequestException('uploadKey does not belong to this artist');
     }
+    const artist = await this.prisma.artist.findUnique({ where: { userId }, select: { id: true } });
+    if (!artist) throw new NotFoundException('Artist profile not found');
 
     const song = await this.prisma.song.create({
       data: {
         title: dto.title,
-        duration: dto.duration,
+        duration: dto.duration ?? 0,
         artistId: artist.id,
         albumId: dto.albumId,
-        genres: dto.genres,
-        tags: dto.tags,
+        genres: dto.genres ?? [],
+        tags: dto.tags ?? [],
         coverImageKey: dto.coverImageKey,
         isPublished: false,
-        hlsManifestKey: '',
       },
-      select: { id: true, artistId: true },
+      select: { id: true },
     });
 
     await this.transcodingQueue.add(
       'song.transcode',
-      { songId: song.id, s3Key: dto.s3Key },
-      {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
-        removeOnComplete: true,
-      },
+      { songId: song.id, uploadKey: dto.uploadKey },
+      { jobId: song.id, attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true },
     );
-
     return { songId: song.id };
   }
 
-  async getStreamUrl(id: string): Promise<{ streamUrl: string }> {
-    const song = await this.prisma.song.findUnique({
-      where: { id },
-      select: { hlsManifestKey: true, isPublished: true },
-    });
-
-    if (!song) {
-      throw new NotFoundException('Song not found');
+  private async signRendition(row: AudioRow, requested: AudioQuality, ttlSeconds: number): Promise<MediaUrlDto | null> {
+    if (!row.isPublished) return null;
+    // Fall back to the other rendition if the requested one is missing.
+    const order: AudioQuality[] = requested === 'low' ? ['low', 'high'] : ['high', 'low'];
+    for (const quality of order) {
+      const key = quality === 'low' ? row.audioLowKey : row.audioHighKey;
+      if (!key) continue;
+      return {
+        songId: row.id,
+        quality,
+        url: await this.storage.signedGetUrl('media', key, ttlSeconds),
+        mimeType: AUDIO_MIME_TYPE,
+        sizeBytes: quality === 'low' ? row.audioLowBytes : row.audioHighBytes,
+        expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+      };
     }
-    if (!song.isPublished) {
-      throw new ForbiddenException('Song is not published yet');
-    }
-
-    return { streamUrl: this.cloudfrontService.createSignedStreamUrl(song.hlsManifestKey) };
+    return null;
   }
 
-  async getSong(id: string) {
-    const song = await this.prisma.song.findUnique({
-      where: { id },
-      include: {
-        artist: {
-          select: { id: true, stageName: true },
-        },
-      },
-    });
-    if (!song) {
-      throw new NotFoundException('Song not found');
-    }
-    return song;
-  }
-
-  async publishSongNotification(artistId: string, songId: string): Promise<void> {
-    await this.notificationQueue.add(
-      'song.published',
-      { event: 'song.published', artistId, songId },
-      { removeOnComplete: true, attempts: 3 },
-    );
-  }
-
-  private assertArtistRole(userId?: string, role?: string): void {
-    if (!userId) {
-      throw new UnauthorizedException('Missing X-User-Id');
-    }
-    if (role !== 'ARTIST') {
-      throw new ForbiddenException('Only ARTIST role can upload songs');
-    }
+  private assertArtist(role?: string): void {
+    if (role !== 'ARTIST') throw new ForbiddenException('Only artists can upload songs');
   }
 }

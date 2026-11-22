@@ -1,30 +1,29 @@
-import {
-  IsArray,
-  IsInt,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Min,
-} from 'class-validator';
+import { IsArray, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
 
 export class SongMetadataDto {
+  /** The key returned by POST /songs/upload-url after the file was PUT there. */
   @IsString()
-  s3Key!: string;
+  uploadKey!: string;
 
   @IsString()
+  @MaxLength(200)
   title!: string;
 
+  /** Seconds. Replaced by the exact duration measured during transcoding. */
+  @IsOptional()
   @IsInt()
   @Min(1)
-  duration!: number;
+  duration?: number;
 
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  genres!: string[];
+  genres?: string[];
 
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  tags!: string[];
+  tags?: string[];
 
   @IsOptional()
   @IsUUID()

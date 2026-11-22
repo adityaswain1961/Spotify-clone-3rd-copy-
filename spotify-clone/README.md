@@ -1,96 +1,114 @@
-# SpotifyClone
+# Spotify Clone
 
-<a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
+A music streaming app: NestJS microservices behind an API gateway, and a React Native app that runs in **Expo Go**, with fast playback, offline mode and song downloads.
 
-✨ Your new, shiny [Nx workspace](https://nx.dev) is ready ✨.
+For the full picture, with architecture diagrams, every service and endpoint, the data model, the app's internals and what each file does, see the illustrated guide: [docs/Spotify-Clone-Repository-Guide.pdf](docs/Spotify-Clone-Repository-Guide.pdf).
 
-[Learn more about this workspace setup and its capabilities](https://nx.dev/getting-started/intro#learn-nx?utm_source=nx_project&amp;utm_medium=readme&amp;utm_campaign=nx_projects) or run `npx nx graph` to visually explore what was created. Now, let's get you up to speed!
-
-## Run tasks
-
-To run tasks with Nx use:
-
-```sh
-npx nx <target> <project-name>
+```
+mobile-app (Expo Go)  ──HTTP──▶  api-gateway :3000  ──▶  auth-service          :3001
+                                  (auth, rate limit,      media-service         :3003  (stream/download URLs, files, transcoding)
+                                   gzip, keep-alive)      playlist-service      :3004
+                                                          interaction-service   :3005  (likes, listens)
+                                                          search-service        :3006
+                                                          recommendation-service:3007  (home feed)
+                                                          notification-service        (queue worker)
+                     Postgres (data) · Redis (cache, queues, refresh tokens) · local disk or S3 (audio)
 ```
 
-For example:
+## Quick start
 
-```sh
-npx nx build myproject
+Requirements: **Node 20.12+**, **pnpm** (`corepack enable`), Postgres 16 and Redis 7 (easiest via Docker), and the **Expo Go** app on your phone (SDK 58).
+
+```bash
+cp .env.example .env            # then set JWT_ACCESS_SECRET and SERVICE_API_KEY to random strings
+docker compose up -d            # Postgres + Redis
+pnpm install
+pnpm db:migrate:deploy          # create / upgrade the schema
+pnpm db:seed                    # demo accounts + 6 playable demo songs
+pnpm dev                        # all backend services
 ```
 
-These targets are either [inferred automatically](https://nx.dev/concepts/inferred-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or defined in the `project.json` or `package.json` files.
+In a second terminal:
 
-[More about running tasks in the docs &raquo;](https://nx.dev/features/run-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Add new projects
-
-While you could add new projects to your workspace manually, you might want to leverage [Nx plugins](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) and their [code generation](https://nx.dev/features/generate-code?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) feature.
-
-To install a new plugin you can use the `nx add` command. Here's an example of adding the React plugin:
-```sh
-npx nx add @nx/react
+```bash
+cd mobile-app
+npm install
+npm start                       # scan the QR code with Expo Go
 ```
 
-Use the plugin's generator to create new projects. For example, to create a new React app or library:
+Log in with `listener@demo.dev` / `password123`, or register a new account.
 
-```sh
-# Generate an app
-npx nx g @nx/react:app demo
+- **Your own music:** `pnpm db:seed ~/Music/some-folder` imports every audio file in the folder. Name files `Artist - Title.mp3` to set the artist. Embedded cover art is extracted automatically.
+- **Phone can't connect?** The phone must be on the same Wi-Fi as your computer, and the computer must allow inbound connections on port 3000. On Windows, allow Node.js on *Private* networks when the firewall asks. The login screen shows which server the app is calling.
+- **Different networks or `npm run tunnel`?** Set `EXPO_PUBLIC_API_URL` in `mobile-app/.env` to a URL the phone can reach.
 
-# Generate a library
-npx nx g @nx/react:lib some-lib
-```
+## Why playback starts fast
 
-You can use `npx nx list` to get a list of installed plugins. Then, run `npx nx list <plugin-name>` to learn about more specific capabilities of a particular plugin. Alternatively, [install Nx Console](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) to browse plugins and generators in your IDE.
+- **Progressive AAC instead of HLS.** Each song is transcoded once into two fast-start `.m4a` files: data saver at 96 kbps and high at 256 kbps. The MP4 index sits at the front of the file, so audio starts after roughly the first 14 KB, with no manifest, then variant, then segment round-trips.
+- **Quality follows the connection.** In Auto mode the app streams high quality on Wi-Fi and data saver on mobile data. You can override this in Settings.
+- **Zero-request taps.** Signed stream URLs for whatever is on screen are fetched in one batched call (`POST /songs/stream-urls`) and cached on disk until shortly before they expire. Tapping play usually needs no API call at all.
+- **Native queue.** The whole queue is handed to `expo-audio`'s native `AudioPlaylist`. Tracks advance without JavaScript, including in the background and from lock-screen next/previous.
+- **Instant screens.** API responses are persisted on the device, so every screen renders from cache immediately and refreshes in the background. The home screen is a single request (`GET /recommendations/home`).
+- **Lean backend.** The gateway keeps connections to services alive and gzips JSON. Songs are hydrated in one query instead of N+1, there are new indexes on every hot query, and search runs its queries in parallel.
 
-[Learn more about Nx plugins &raquo;](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) | [Browse the plugin registry &raquo;](https://nx.dev/plugin-registry?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+## Offline mode and downloads
 
-## Set up CI!
+- **Download anything.** Use the download button on a playlist or Liked Songs, or long-press any song. Downloads run two at a time, survive app restarts, resume after a connection drop, and wait for Wi-Fi unless you allow mobile data in Settings. Cover art is saved alongside the audio.
+- **When the connection drops,** an offline banner appears, downloaded songs keep playing, un-downloaded songs dim, and the queue drops tracks that would need the network. Search switches to searching your downloads.
+- **Nothing is lost while offline.** Likes are queued and replayed when you reconnect. They send the desired state rather than a toggle, so a replay can't undo them. Plays are queued on disk and sent in one batch later. Being offline never logs you out; refresh tokens last 30 days.
+- **Quick restarts.** The last queue and position come back after an app restart.
 
-### Step 1
+## What changed in this cleanup
 
-To connect to Nx Cloud, run the following command:
+- **New mobile app.** Expo Go (SDK 58) replaces the Kotlin app. Everything it uses ships inside Expo Go, so no native build is needed.
+- **Gateway fixes:**
+  - POST bodies no longer hang. Nest's body parser was consuming them before the proxy.
+  - Spoofed `X-User-Id` headers are stripped on every route.
+  - Services are reached on localhost by default instead of on Docker hostnames that didn't exist.
+  - CORS now works.
+  - Internal services accept requests only from the gateway (`SERVICE_API_KEY`).
+- **Security and correctness fixes:**
+  - Private playlists could be read for 60 seconds after their owner opened them, because the cache was checked before the privacy check.
+  - Removing or reordering playlist songs violated the position unique index.
+  - Like toggles could double-apply.
+  - Refresh tokens could be replayed concurrently.
+  - Artist sign-ups never created the artist profile that uploads require.
+  - The HLS transcode mapped one audio stream to three variants.
+  - CloudFront signatures didn't cover HLS segments.
+- **Tightened dependencies.** Nest 10 → 11, matching the Express 5 the repo already declared. `.env` loading now works for every service. OpenTelemetry is opt-in. The schema and migrations no longer drift. `fluent-ffmpeg`, Passport, Throttler and LocalStack were removed: dev storage is now local disk, and production uses S3 or CloudFront via `STORAGE_DRIVER=s3`.
+- **Services can actually start now.** `pnpm dev` used to run on `tsx`, which can't emit the decorator metadata Nest needs for dependency injection, so every service except the gateway crashed on boot. This was broken before the cleanup too. Dev now runs on SWC (`@swc-node/register`) with Node's built-in watch mode. The notification worker was also missing its logger provider.
+- **Breaking migration.** `20261106120000_progressive_audio_and_indexes` drops the old `hls_manifest_key` column. Songs uploaded before it need to be re-uploaded or re-seeded.
 
-```sh
-npx nx connect
-```
+## Useful commands
 
-Connecting to Nx Cloud ensures a [fast and scalable CI](https://nx.dev/ci/intro/why-nx-cloud?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) pipeline. It includes features such as:
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` | Run every backend service with reload |
+| `pnpm typecheck` | Typecheck the whole backend |
+| `pnpm db:migrate` | Create a new migration after editing `libs/prisma/schema.prisma` |
+| `pnpm db:seed [folder]` | Add demo or your own songs (idempotent) |
+| `pnpm mobile` | Start the Expo dev server |
+| `pnpm mobile:typecheck` | Typecheck the app |
 
-- [Remote caching](https://nx.dev/ci/features/remote-cache?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task distribution across multiple machines](https://nx.dev/ci/features/distribute-task-execution?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Automated e2e test splitting](https://nx.dev/ci/features/split-e2e-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task flakiness detection and rerunning](https://nx.dev/ci/features/flaky-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+## API overview (through the gateway)
 
-### Step 2
+| Method & path | Auth | Purpose |
+| --- | --- | --- |
+| `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout` | – | Sessions (`{ accessToken, refreshToken, expiresIn, user }`) |
+| `GET /auth/me` | ✓ | Current user |
+| `GET /recommendations/home` | ✓ | Every home section in one call |
+| `GET /search?q=` | – | Prefix search across songs (including artist names), artists and playlists |
+| `GET /songs?ids=a,b` · `GET /songs/:id` | – | Song metadata |
+| `POST /songs/stream-urls` | ✓ | Signed URLs for a whole queue |
+| `GET /songs/:id/stream` · `/download?quality=low\|high` | ✓ | Signed URL for one song |
+| `GET /playlists/me` · `GET /playlists/:id` · `POST/DELETE …/songs` | ✓ | Playlists |
+| `POST /interactions/likes` `{ songId, liked }` · `GET /interactions/me/likes[/ids]` | ✓ | Likes (idempotent) |
+| `POST /interactions/listens` `{ events: [...] }` | ✓ | Batched play history |
 
-Use the following command to configure a CI workflow for your workspace:
+Service responses are wrapped as `{ data, meta }`. Errors are `{ statusCode, message, requestId }`.
 
-```sh
-npx nx g ci-workflow
-```
+## Production notes
 
-[Learn more about Nx on CI](https://nx.dev/ci/intro/ci-with-nx#ready-get-started-with-your-provider?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Install Nx Console
-
-Nx Console is an editor extension that enriches your developer experience. It lets you run tasks, generate code, and improves code autocompletion in your IDE. It is available for VSCode and IntelliJ.
-
-[Install Nx Console &raquo;](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Useful links
-
-Learn more:
-
-- [Learn more about this workspace setup](https://nx.dev/getting-started/intro#learn-nx?utm_source=nx_project&amp;utm_medium=readme&amp;utm_campaign=nx_projects)
-- [Learn about Nx on CI](https://nx.dev/ci/intro/ci-with-nx?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Releasing Packages with Nx release](https://nx.dev/features/manage-releases?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [What are Nx plugins?](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-And join the Nx community:
-- [Discord](https://go.nx.dev/community)
-- [Follow us on X](https://twitter.com/nxdevtools) or [LinkedIn](https://www.linkedin.com/company/nrwl)
-- [Our Youtube channel](https://www.youtube.com/@nxdevtools)
-- [Our blog](https://nx.dev/blog?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+- Set `STORAGE_DRIVER=s3` with `S3_UPLOAD_BUCKET` and `S3_MEDIA_BUCKET`. Optionally add the `CLOUDFRONT_*` settings so media is served from the edge, and `ASSETS_BASE_URL` for covers.
+- Use real secrets for `JWT_ACCESS_SECRET` and `SERVICE_API_KEY`, set `ALLOWED_ORIGINS`, and put HTTPS in front of the gateway.
+- Expo Go is for development. For store builds, use `eas build` and set `EXPO_PUBLIC_API_URL` to your HTTPS gateway.

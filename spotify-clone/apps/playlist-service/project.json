@@ -6,7 +6,9 @@
   "targets": {
     "build": {
       "executor": "@nx/js:tsc",
-      "outputs": ["{options.outputPath}"],
+      "outputs": [
+        "{options.outputPath}"
+      ],
       "options": {
         "outputPath": "dist/apps/playlist-service",
         "main": "apps/playlist-service/src/main.ts",
@@ -17,11 +19,8 @@
     "serve": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "node -r tsconfig-paths/register ./node_modules/tsx/dist/cli.mjs watch --tsconfig apps/playlist-service/tsconfig.app.json apps/playlist-service/src/main.ts",
-        "cwd": "{workspaceRoot}",
-        "env": {
-          "TS_NODE_PROJECT": "tsconfig.json"
-        }
+        "command": "node --watch --watch-preserve-output -r @swc-node/register apps/playlist-service/src/main.ts",
+        "cwd": "{workspaceRoot}"
       }
     }
   },

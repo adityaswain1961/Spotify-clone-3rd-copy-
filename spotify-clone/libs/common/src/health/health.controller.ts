@@ -6,13 +6,14 @@ import {
 } from '@nestjs/terminus';
 import Redis from 'ioredis';
 import { PrismaService } from '@spotify/prisma';
+import { REDIS_CLIENT } from '../redis/redis.module';
 
 @Controller()
 export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
     private readonly prisma: PrismaService,
-    @Inject('REDIS_CLIENT') private readonly redis: Redis,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   @Get('health')

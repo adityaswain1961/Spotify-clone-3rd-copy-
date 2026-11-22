@@ -1,14 +1,5 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Headers,
-  Param,
-  Patch,
-  Post,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { UserId } from '@spotify/common';
 import { PlaylistsService } from './playlists.service';
 import { CreatePlaylistDto } from './dto/create-playlist.dto';
 import { AddSongDto } from './dto/add-song.dto';
@@ -20,53 +11,41 @@ export class PlaylistsController {
   constructor(private readonly playlistsService: PlaylistsService) {}
 
   @Post()
-  create(
-    @Headers('x-user-id') userId: string | undefined,
-    @Body() dto: CreatePlaylistDto,
-  ) {
+  create(@UserId() userId: string, @Body() dto: CreatePlaylistDto) {
     return this.playlistsService.create(userId, dto);
   }
 
   @Get('me')
-  getMine(
-    @Headers('x-user-id') userId: string | undefined,
-    @Query() pagination: PaginationDto,
-  ) {
+  getMine(@UserId() userId: string, @Query() pagination: PaginationDto) {
     return this.playlistsService.getMine(userId, pagination.page, pagination.size);
   }
 
   @Get(':id')
-  getById(
-    @Param('id') id: string,
-    @Headers('x-user-id') userId: string | undefined,
-  ) {
+  getById(@Param('id', ParseUUIDPipe) id: string, @UserId({ optional: true }) userId?: string) {
     return this.playlistsService.getById(id, userId);
   }
 
+  @Delete(':id')
+  remove(@Param('id', ParseUUIDPipe) id: string, @UserId() userId: string) {
+    return this.playlistsService.remove(id, userId);
+  }
+
   @Post(':id/songs')
-  addSong(
-    @Param('id') id: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Body() dto: AddSongDto,
-  ) {
+  addSong(@Param('id', ParseUUIDPipe) id: string, @UserId() userId: string, @Body() dto: AddSongDto) {
     return this.playlistsService.addSong(id, userId, dto);
   }
 
   @Delete(':id/songs/:songId')
   removeSong(
-    @Param('id') id: string,
-    @Param('songId') songId: string,
-    @Headers('x-user-id') userId: string | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('songId', ParseUUIDPipe) songId: string,
+    @UserId() userId: string,
   ) {
     return this.playlistsService.removeSong(id, songId, userId);
   }
 
   @Patch(':id/songs/reorder')
-  reorder(
-    @Param('id') id: string,
-    @Headers('x-user-id') userId: string | undefined,
-    @Body() dto: ReorderSongDto,
-  ) {
+  reorder(@Param('id', ParseUUIDPipe) id: string, @UserId() userId: string, @Body() dto: ReorderSongDto) {
     return this.playlistsService.reorder(id, userId, dto);
   }
 }

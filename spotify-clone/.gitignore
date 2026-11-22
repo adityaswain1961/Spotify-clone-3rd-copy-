@@ -42,3 +42,12 @@ Thumbs.db
 .nx/workspace-data
 .claude/worktrees
 .claude/settings.local.json
+
+# local config & data
+.env
+.env.*
+!.env.example
+/storage/
+
+# Android/Gradle leftovers
+.gradle/
