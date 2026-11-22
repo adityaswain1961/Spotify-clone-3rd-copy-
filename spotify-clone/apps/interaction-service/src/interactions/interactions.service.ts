@@ -1,130 +1,112 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import Redis from 'ioredis';
-import { PrismaService } from '@spotify/prisma';
+import { NOTIFICATION_QUEUE } from '@spotify/bull-config';
+import { REDIS_CLIENT } from '@spotify/common';
+import { PrismaService, songSelect, toSongDto } from '@spotify/prisma';
 import { ToggleLikeDto } from './dto/toggle-like.dto';
 import { ToggleFollowDto } from './dto/toggle-follow.dto';
 import { ListenDto } from './dto/listen.dto';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
-import { NOTIFICATION_QUEUE } from '@spotify/bull-config';
+
+const MAX_LISTEN_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class InteractionsService {
   constructor(
     private readonly prisma: PrismaService,
-    @Inject('REDIS_CLIENT') private readonly redis: Redis,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue,
   ) {}
 
-  async toggleLike(userId: string | undefined, dto: ToggleLikeDto): Promise<{ liked: boolean }> {
-    this.assertUser(userId);
+  async setLike(userId: string, dto: ToggleLikeDto): Promise<{ liked: boolean }> {
     const { songId, playlistId } = dto;
-    if (!songId && !playlistId) {
-      throw new BadRequestException('Either songId or playlistId is required');
+    if (Boolean(songId) === Boolean(playlistId)) {
+      throw new BadRequestException('Provide exactly one of songId or playlistId');
     }
-    if (songId && playlistId) {
-      throw new BadRequestException('Only one of songId or playlistId is allowed');
-    }
+    const target = songId ? { songId } : { playlistId: playlistId! };
+    const where = songId
+      ? { userId_songId: { userId, songId } }
+      : { userId_playlistId: { userId, playlistId: playlistId! } };
 
-    if (songId) {
-      const existing = await this.prisma.like.findUnique({
-        where: { userId_songId: { userId: userId!, songId } },
-        select: { id: true },
-      });
-      if (existing) {
-        await this.prisma.like.delete({ where: { id: existing.id } });
-        return { liked: false };
-      }
-      await this.prisma.like.create({ data: { userId: userId!, songId } });
-      return { liked: true };
-    }
+    const desired =
+      dto.liked ?? !(await this.prisma.like.findUnique({ where, select: { id: true } }));
 
-    const existing = await this.prisma.like.findUnique({
-      where: { userId_playlistId: { userId: userId!, playlistId: playlistId! } },
-      select: { id: true },
-    });
-    if (existing) {
-      await this.prisma.like.delete({ where: { id: existing.id } });
-      return { liked: false };
+    if (desired) {
+      // upsert keeps this idempotent and safe against concurrent double-taps.
+      await this.prisma.like.upsert({ where, create: { userId, ...target }, update: {} });
+    } else {
+      await this.prisma.like.deleteMany({ where: { userId, ...target } });
     }
-    await this.prisma.like.create({ data: { userId: userId!, playlistId: playlistId! } });
-    return { liked: true };
+    return { liked: desired };
   }
 
-  async getMyLikedSongs(userId: string | undefined, page = 1, size = 10) {
-    this.assertUser(userId);
-    const skip = (page - 1) * size;
-
-    const [items, total] = await this.prisma.$transaction([
+  async getMyLikedSongs(userId: string, page: number, size: number) {
+    const where = { userId, songId: { not: null }, song: { isPublished: true } };
+    const [rows, total] = await this.prisma.$transaction([
       this.prisma.like.findMany({
-        where: { userId: userId!, songId: { not: null } },
+        where,
         orderBy: { createdAt: 'desc' },
-        skip,
+        skip: (page - 1) * size,
         take: size,
-        include: {
-          song: {
-            include: { artist: { select: { id: true, stageName: true } } },
-          },
-        },
+        select: { createdAt: true, song: { select: songSelect } },
       }),
-      this.prisma.like.count({ where: { userId: userId!, songId: { not: null } } }),
+      this.prisma.like.count({ where }),
     ]);
 
+    const items = rows
+      .filter((row) => row.song)
+      .map((row) => ({ ...toSongDto(row.song!), likedAt: row.createdAt.toISOString() }));
     return { items, page, size, total };
   }
 
-  async toggleFollow(
-    userId: string | undefined,
-    dto: ToggleFollowDto,
-  ): Promise<{ following: boolean }> {
-    this.assertUser(userId);
-
-    const existing = await this.prisma.artistFollow.findUnique({
-      where: { userId_artistId: { userId: userId!, artistId: dto.artistId } },
-      select: { id: true },
+  async getMyLikedSongIds(userId: string): Promise<{ songIds: string[] }> {
+    const rows = await this.prisma.like.findMany({
+      where: { userId, songId: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      select: { songId: true },
+      take: 5000,
     });
+    return { songIds: rows.map((row) => row.songId!) };
+  }
 
+  async toggleFollow(userId: string, dto: ToggleFollowDto): Promise<{ following: boolean }> {
+    const where = { userId_artistId: { userId, artistId: dto.artistId } };
+    const existing = await this.prisma.artistFollow.findUnique({ where, select: { id: true } });
     if (existing) {
       await this.prisma.artistFollow.delete({ where: { id: existing.id } });
       return { following: false };
     }
 
-    await this.prisma.artistFollow.create({
-      data: { userId: userId!, artistId: dto.artistId },
-    });
-
-    await this.notificationQueue.add(
-      'artist.followed',
-      { event: 'artist.followed', artistId: dto.artistId, followerId: userId! },
-      { removeOnComplete: true, attempts: 3 },
-    );
-
+    await this.prisma.artistFollow.create({ data: { userId, artistId: dto.artistId } });
+    await this.notificationQueue
+      .add('artist.followed', { event: 'artist.followed', artistId: dto.artistId, followerId: userId }, { removeOnComplete: true, attempts: 3 })
+      .catch(() => undefined);
     return { following: true };
   }
 
-  async listen(userId: string | undefined, dto: ListenDto): Promise<{ success: boolean }> {
-    this.assertUser(userId);
+  async recordListens(userId: string, events: ListenDto[]): Promise<{ recorded: number }> {
+    const now = Date.now();
+    const valid = events
+      .map((event) => ({
+        songId: event.songId,
+        // Clamp client clocks: no future timestamps, nothing older than 30 days.
+        listenedAt: new Date(Math.min(now, Math.max(now - MAX_LISTEN_AGE_MS, Date.parse(event.listenedAt ?? '') || now))),
+      }));
 
-    await this.prisma.listenHistory.create({
-      data: {
-        userId: userId!,
-        songId: dto.songId,
-      },
+    // Ignore ids that don't exist instead of failing the whole offline batch.
+    const known = await this.prisma.song.findMany({
+      where: { id: { in: [...new Set(valid.map((event) => event.songId))] } },
+      select: { id: true },
     });
+    const knownIds = new Set(known.map((song) => song.id));
+    const rows = valid.filter((event) => knownIds.has(event.songId)).map((event) => ({ userId, ...event }));
+    if (!rows.length) return { recorded: 0 };
 
-    await this.redis.incr(`song:${dto.songId}:plays`);
-    return { success: true };
-  }
-
-  private assertUser(userId?: string): void {
-    if (!userId) {
-      throw new UnauthorizedException('Missing X-User-Id');
-    }
+    await this.prisma.listenHistory.createMany({ data: rows });
+    const pipeline = this.redis.pipeline();
+    for (const row of rows) pipeline.incr(`song:${row.songId}:plays`);
+    await pipeline.exec();
+    return { recorded: rows.length };
   }
 }
-

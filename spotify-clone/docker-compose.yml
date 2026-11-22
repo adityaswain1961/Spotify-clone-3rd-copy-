@@ -1,6 +1,8 @@
+# Local infrastructure only. Media is stored on local disk (STORAGE_DRIVER=local),
+# so no S3 emulator is needed for development.
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16-alpine
     container_name: spotify-postgres
     ports:
       - "5432:5432"
@@ -10,28 +12,26 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d spotify"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     container_name: spotify-redis
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-
-  localstack:
-    image: localstack/localstack:latest
-    container_name: spotify-localstack
-    ports:
-      - "4566:4566"
-    environment:
-      - SERVICES=s3
-      - DEBUG=1
-      - AWS_DEFAULT_REGION=us-east-1
-    volumes:
-      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   postgres_data:
   redis_data:
-  localstack_data:

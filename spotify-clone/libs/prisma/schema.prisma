@@ -62,7 +62,7 @@ model Artist {
   albums  Album[]
   follows ArtistFollow[]
 
-  @@index([searchVector], type: Gin)
+  @@index([searchVector], type: Gin, map: "artists_search_vector_gin")
   @@map("artists")
 }
 
@@ -70,7 +70,10 @@ model Song {
   id             String   @id @default(uuid())
   title          String
   duration       Int
-  hlsManifestKey String   @map("hls_manifest_key")
+  audioLowKey    String?  @map("audio_low_key")
+  audioHighKey   String?  @map("audio_high_key")
+  audioLowBytes  Int?     @map("audio_low_bytes")
+  audioHighBytes Int?     @map("audio_high_bytes")
   coverImageKey  String?  @map("cover_image_key")
   genres         String[] @default([])
   tags           String[] @default([])
@@ -89,7 +92,10 @@ model Song {
   likes         Like[]
   listenHistory ListenHistory[]
 
-  @@index([searchVector], type: Gin)
+  @@index([searchVector], type: Gin, map: "songs_search_vector_gin")
+  @@index([artistId])
+  @@index([isPublished, createdAt(sort: Desc)])
+  @@index([playCount(sort: Desc)])
   @@map("songs")
 }
 
@@ -123,7 +129,8 @@ model Playlist {
   playlistSongs PlaylistSong[]
   likes         Like[]
 
-  @@index([searchVector], type: Gin)
+  @@index([searchVector], type: Gin, map: "playlists_search_vector_gin")
+  @@index([userId, updatedAt(sort: Desc)])
   @@map("playlists")
 }
 
@@ -155,6 +162,7 @@ model Like {
 
   @@unique([userId, songId])
   @@unique([userId, playlistId])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("likes")
 }
 
@@ -168,6 +176,7 @@ model ArtistFollow {
   artist Artist @relation(fields: [artistId], references: [id])
 
   @@unique([userId, artistId])
+  @@index([artistId])
   @@map("artist_follows")
 }
 
@@ -180,5 +189,8 @@ model ListenHistory {
   user User @relation(fields: [userId], references: [id])
   song Song @relation(fields: [songId], references: [id])
 
+  @@index([userId, listenedAt(sort: Desc)])
+  @@index([songId, listenedAt])
+  @@index([listenedAt])
   @@map("listen_history")
 }

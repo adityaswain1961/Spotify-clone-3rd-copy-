@@ -1,17 +1,17 @@
+import '@spotify/env';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { PinoLoggerService, setupOtel } from '@spotify/common';
+import { AppModule } from './app.module';
 
+/** Queue consumer only - no HTTP server. */
 async function bootstrap(): Promise<void> {
-  await setupOtel();
-  const app = await NestFactory.createApplicationContext(AppModule, {
-    bufferLogs: true,
-  });
+  await setupOtel('notification-service');
+  const app = await NestFactory.createApplicationContext(AppModule, { bufferLogs: true });
   const logger = app.get(PinoLoggerService);
   app.useLogger(logger);
-  logger.log('notification-service worker started on port 3008 (queue consumer only)');
+  app.enableShutdownHooks();
+  logger.log('notification-service worker started');
 }
 
 void bootstrap();
-

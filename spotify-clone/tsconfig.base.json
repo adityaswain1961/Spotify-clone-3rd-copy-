@@ -1,10 +1,10 @@
 {
   "compileOnSave": false,
   "compilerOptions": {
-    "target": "ES2021",
+    "target": "ES2022",
     "module": "commonjs",
     "moduleResolution": "node",
-    "lib": ["ES2021"],
+    "lib": ["ES2022"],
     "sourceMap": true,
     "declaration": false,
     "removeComments": true,
@@ -14,12 +14,15 @@
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
+    "types": ["node"],
     "baseUrl": ".",
     "paths": {
+      "@spotify/env": ["libs/common/src/config/load-env.ts"],
       "@spotify/common": ["libs/common/src/index.ts"],
       "@spotify/prisma": ["libs/prisma/src/index.ts"],
-      "@spotify/bull-config": ["libs/bull-config/src/index.ts"]
+      "@spotify/bull-config": ["libs/bull-config/src/index.ts"],
+      "@spotify/media": ["libs/media/src/index.ts"]
     }
   },
-  "exclude": ["node_modules", "tmp"]
+  "exclude": ["node_modules", "tmp", "mobile-app"]
 }

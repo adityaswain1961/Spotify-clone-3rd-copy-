@@ -2,9 +2,8 @@ import { Module } from '@nestjs/common';
 import { TerminusModule } from '@nestjs/terminus';
 import { PrismaModule } from '@spotify/prisma';
 import { BullConfigModule } from '@spotify/bull-config';
+import { HealthController, PinoLoggerService, RedisModule } from '@spotify/common';
 import { AuthModule } from './auth/auth.module';
-import { HealthController, PinoLoggerService } from '@spotify/common';
-import { RedisModule } from './redis.module';
 
 @Module({
   imports: [PrismaModule, BullConfigModule, RedisModule, TerminusModule, AuthModule],

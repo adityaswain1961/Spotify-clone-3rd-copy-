@@ -1,19 +1,10 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Headers,
-  Post,
-  UnauthorizedException,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { UserId } from '@spotify/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { LogoutDto } from './dto/logout.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
-import { JwtAuthGuard } from './jwt-auth.guard';
-import { LogoutDto } from './dto/logout.dto';
-import { ServiceApiKeyGuard } from '../guards/service-api-key.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -25,29 +16,26 @@ export class AuthController {
   }
 
   @Post('login')
+  @HttpCode(200)
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
   @Post('refresh')
+  @HttpCode(200)
   refresh(@Body() dto: RefreshDto) {
     return this.authService.refresh(dto.refreshToken);
   }
 
-  @UseGuards(JwtAuthGuard)
+  /** Public on purpose: revoking a refresh token must work even with an expired access token. */
   @Post('logout')
+  @HttpCode(200)
   logout(@Body() dto: LogoutDto) {
     return this.authService.logout(dto.refreshToken);
   }
 
-  @UseGuards(ServiceApiKeyGuard)
-  @Get('validate-token')
-  async validateToken(@Headers('authorization') authorization?: string) {
-    if (!authorization?.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
-    }
-
-    const token = authorization.replace('Bearer ', '').trim();
-    return this.authService.validateToken(token);
+  @Get('me')
+  me(@UserId() userId: string) {
+    return this.authService.me(userId);
   }
 }

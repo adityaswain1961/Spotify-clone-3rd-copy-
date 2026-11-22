@@ -1,23 +1,27 @@
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+let started = false;
 
-let sdk: NodeSDK | null = null;
-
-export async function setupOtel(): Promise<void> {
-  if (sdk) {
+/**
+ * Tracing is opt-in: it only starts when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+ * Loading the auto-instrumentations costs ~1-2s of startup and memory per service,
+ * and without a collector every span export just fails, so local dev skips it.
+ */
+export async function setupOtel(serviceName: string): Promise<void> {
+  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  if (started || !endpoint) {
     return;
   }
+  started = true;
 
-  const exporter = new OTLPTraceExporter({
-    url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-  });
+  const [{ NodeSDK }, { OTLPTraceExporter }, { getNodeAutoInstrumentations }] = await Promise.all([
+    import('@opentelemetry/sdk-node'),
+    import('@opentelemetry/exporter-trace-otlp-http'),
+    import('@opentelemetry/auto-instrumentations-node'),
+  ]);
 
-  sdk = new NodeSDK({
-    traceExporter: exporter,
+  const sdk = new NodeSDK({
+    traceExporter: new OTLPTraceExporter({ url: endpoint }),
     instrumentations: [getNodeAutoInstrumentations()],
-    serviceName: process.env.OTEL_SERVICE_NAME ?? 'spotify-service',
+    serviceName: process.env.OTEL_SERVICE_NAME ?? serviceName,
   });
-
-  await sdk.start();
+  sdk.start();
 }

@@ -8,7 +8,6 @@ export class SearchController {
 
   @Get()
   search(@Query() query: SearchQueryDto) {
-    return this.searchService.search(query.q, query.type ?? 'all', query.page ?? 1, query.size ?? 10);
+    return this.searchService.search(query.q, query.type, query.page, query.size);
   }
 }
-
